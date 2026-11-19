@@ -1,6 +1,8 @@
 package com.dealership;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Scanner;
 
@@ -35,9 +37,10 @@ public class UserInterface {
                     7 - List ALL vehicles
                     8 - Add a vehicle
                     9 - Remove a vehicle
+                    10 - Sell / Lease a vehicle
                     99 - Quit
                     """);
-            System.out.print("Enter your choice (1-9 or 99): ");
+            System.out.print("Enter your choice (1-10 or 99): ");
             String choice = input.nextLine().trim();
 
             switch (choice) {
@@ -50,11 +53,12 @@ public class UserInterface {
                 case "7" -> processGetAllVehiclesRequest();
                 case "8" -> processAddVehicleRequest();
                 case "9" -> processRemoveVehicleRequest();
+                case "10" -> processSellLeaseRequest();
                 case "99" -> {
                     inLoop = false;
                     System.out.println("\n=== Thank you, Goodbye ===");
                 }
-                default -> System.out.println("\n!!! Invalid Choice - Please enter 1-9 or 99 !!!");
+                default -> System.out.println("\n!!! Invalid Choice - Please enter 1-10 or 99 !!!");
             }
         } while (inLoop);
     }
@@ -231,6 +235,106 @@ public class UserInterface {
         new DealershipFileManager().saveDealership(dealership);
 
         System.out.println("\n=== Vehicle Removed Successfully ===");
+    }
+
+    // sell or lease a vehicle, save the contract and remove the vehicle from the inventory
+    public void processSellLeaseRequest() {
+        System.out.println("\n=== Sell / Lease a Vehicle ===");
+        int vehicleVin = promptForNumber("Enter the VIN of the vehicle (ex: 10112): ");
+
+        Vehicle vehicleSold = findVehicleByVin(vehicleVin);
+        if (vehicleSold == null) {
+            System.out.println("\n!!! No vehicle found with VIN " + vehicleVin + " !!!");
+            return;
+        }
+
+        System.out.println("\n" + Vehicle.tableHeader());
+        System.out.println(vehicleSold);
+
+        String contractType = promptForChoice("Sale or Lease? (S/L): ", "S", "L");
+
+        // a vehicle over 3 years old can't be leased
+        int vehicleAge = LocalDate.now().getYear() - vehicleSold.getYear();
+        if (contractType.equals("L") && vehicleAge > 3) {
+            System.out.println("\n!!! This vehicle is " + vehicleAge + " years old - " +
+                    "only vehicles 3 years old or newer can be leased !!!");
+            return;
+        }
+
+        boolean finance = false;
+        if (contractType.equals("S")) {
+            finance = promptForChoice("Finance the vehicle? (Y/N): ", "Y", "N").equals("Y");
+        }
+
+        System.out.print("\nCustomer Name (ex: Dana Wyatt): ");
+        String customerName = input.nextLine().trim();
+        System.out.print("Customer Email (ex: dana@texas.com): ");
+        String customerEmail = input.nextLine().trim();
+
+        Contract contract;
+        if (contractType.equals("S")) {
+            contract = new SalesContract(LocalDate.now(), customerName, customerEmail, vehicleSold, finance);
+        } else {
+            contract = new LeaseContract(LocalDate.now(), customerName, customerEmail, vehicleSold);
+        }
+
+        displayContract(contract);
+
+        if (promptForChoice("Confirm this contract? (Y/N): ", "Y", "N").equals("N")) {
+            System.out.println("\n=== Contract Cancelled ===");
+            return;
+        }
+
+        // save the contract, then take the vehicle out of the inventory file
+        new ContractDataManager().saveContract(contract);
+        dealership.removeVehicle(vehicleSold);
+        new DealershipFileManager().saveDealership(dealership);
+
+        System.out.println("\n=== Contract Saved - Vehicle Removed from Inventory ===");
+    }
+
+    // print every price and fee of a contract before the user confirms it
+    private void displayContract(Contract contract) {
+        DateTimeFormatter displayFormatter = DateTimeFormatter.ofPattern("MM/dd/yyyy");
+        Vehicle vehicleSold = contract.getVehicleSold();
+
+        System.out.println("\n=== Contract Summary ===");
+        System.out.println("Date:                  " + contract.getDate().format(displayFormatter));
+        System.out.println("Customer:              " + contract.getCustomerName() + " (" + contract.getCustomerEmail() + ")");
+        System.out.println("Vehicle:               " + vehicleSold.getYear() + " " + vehicleSold.getMake() + " " +
+                vehicleSold.getModel() + " (VIN " + vehicleSold.getVin() + ")");
+        System.out.println("Vehicle Price:         $" + vehicleSold.getPrice());
+
+        if (contract instanceof SalesContract) {
+            SalesContract salesContract = (SalesContract) contract;
+            System.out.println("Contract Type:         Sale");
+            System.out.println("Sales Tax (5%):        $" + salesContract.getSalesTax());
+            System.out.println("Recording Fee:         $" + salesContract.getRecordingFee());
+            System.out.println("Processing Fee:        $" + salesContract.getProcessingFee());
+            System.out.println("Financed:              " + (salesContract.isFinance() ? "YES" : "NO"));
+
+        } else if (contract instanceof LeaseContract) {
+            LeaseContract leaseContract = (LeaseContract) contract;
+            System.out.println("Contract Type:         Lease");
+            System.out.println("Ending Value (50%):    $" + leaseContract.getExpectedEndingValue());
+            System.out.println("Lease Fee (7%):        $" + leaseContract.getLeaseFee());
+        }
+
+        System.out.println("Total Price:           $" + contract.getTotalPrice());
+        System.out.println("Monthly Payment:       $" + contract.getMonthlyPayment());
+    }
+
+    // keep asking until the user enters one of the two choices
+    private String promptForChoice(String prompt, String firstChoice, String secondChoice) {
+        while (true) {
+            System.out.print("\n" + prompt);
+            String choice = input.nextLine().trim().toUpperCase();
+
+            if (choice.equals(firstChoice) || choice.equals(secondChoice)) {
+                return choice;
+            }
+            System.out.println("!!! Please enter " + firstChoice + " or " + secondChoice + " !!!");
+        }
     }
 
     // return the vehicle with this VIN, or null if there is none
